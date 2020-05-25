@@ -1,139 +1,124 @@
-extends PathfindingAI
+extends BaseAI
 
-class_name AttackerAI
+class_name PathfindingAI
 
-var attacks_in_sequence
-var current_attack_in_sequence = 1
-var attack_started = false
-var has_attack_landed = false
-var repeat_attacks = false
-var attack_range
-var complete_attack_sequence = false
+onready var playerDetectionArea = $PlayerDetectionArea
+onready var collisionRayCast = $CollisionRayCast
+onready var navigation_mesh = get_parent()
 
-func setAttacksInSequence(a_i_s : int) -> void:
-	attacks_in_sequence = a_i_s
+const PLAYER_POSITION_OFFSET = 25
 
-func getAttacksInSequence() -> int:
-	return attacks_in_sequence
+var path = []
+var path_ind = 0
+var path_blocked = false
+var move_speed = 100
+var vector_threshold = 0.05
+var velocity = Vector2()
 
-func setCurrentAttackInSequence(current_a_i_s : int) -> void:
-	current_attack_in_sequence = current_a_i_s
+var player
 
-func getCurrentAttackInSequence() -> int:
-	return current_attack_in_sequence
+func setPathBlocked(blocked_var : bool) -> void:
+	path_blocked = blocked_var
 
-func setAttackStarted(attack_started_var : bool) -> void:
-	attack_started = attack_started_var
+func getPathBlocked() -> bool:
+	return path_blocked
 
-func getAttackStarted() -> bool:
-	return attack_started
+func setMoveSpeed(speed : float) -> void:
+	move_speed = speed
 
-func setHasAttackLanded(landed_var) -> void:
-	has_attack_landed = landed_var
+func getMoveSpeed() -> float:
+	return move_speed
 
-func getHasAttackLanded() -> bool:
-	return has_attack_landed
+func setVectorThreshold(threshold : float) -> void:
+	vector_threshold = threshold
 
-func setRepeatAttacks(repeats_var : bool) -> void:
-	repeat_attacks = repeats_var
+func getVectorThreshold() -> float:
+	return vector_threshold
 
-func getRepeatAttacks() -> bool:
-	return repeat_attacks
+func setVelocity(velocity_arg : Vector2) -> void:
+	velocity = velocity_arg
 
-func setAttackRange(attack_range_var) -> void:
-	attack_range = attack_range_var
+func getVelocity() -> Vector2:
+	return velocity
 
-func getAttackRange() -> float:
-	return attack_range
+func setPlayer(player_var : KinematicBody2D) -> void:
+	player = player_var
 
-func setCompleteAttackSequence(complete_sequence : bool) -> void:
-	complete_attack_sequence = complete_sequence
+func getPlayer() -> KinematicBody2D:
+	return player
 
-func getCompleteAttackSequence() -> bool:
-	return complete_attack_sequence
+func detectPlayer() -> void:
+	var playerDetectionOverlaps = playerDetectionArea.get_overlapping_areas()
+	if playerDetectionOverlaps:
+		for area in playerDetectionOverlaps:
+			if area.get_parent().get("IS_PLAYER"):
+				setPlayer(area.get_parent())
 
-func isPlayerInRange() -> bool:
-	var distance_to_player = get_global_position().distance_to(
-		getPlayer().get_global_position()
-	)
-	if distance_to_player <= getAttackRange():
-		return true
-	return false
+func alignRayCastToPlayer() -> void:
+	collisionRayCast.rotation = getAngleToPlayer()
 
-func getAnimation() -> String:
-	if [NAVIGATING, FOLLOWING_PLAYER, WANDERING].has(getState()):
-		return getNavigationAnimation()
-	if [PRE_ATTACK, ATTACKING, POST_ATTACK].has(getState()):
-		return getAttackAnimation()
-	return "idle"
+func getAngleToPlayer() -> float:
+	return get_angle_to(player.get_global_position())
 
-func getNavigationAnimation() -> String:
-	if velocity.x >= 0.1:
-		animatedSprite.flip_h = false
-	if velocity.x <= -0.1:
-		animatedSprite.flip_h = true
-	return "run"
-
-func getAttackAnimation() -> String:
-	match getState():
-		PRE_ATTACK:
-			return "pre_attack"
-		ATTACKING:
-			if getRepeatAttacks():
-				return "attack"
-			return "attack_" + str(getCurrentAttackInSequence())
-		POST_ATTACK:
-			return "post_attack"
-	return "idle"
-
-func setPreAttack() -> void:
-	if not [PRE_ATTACK, ATTACKING, POST_ATTACK].has(getState()):
-		setAttackStarted(true)
-		setState(PRE_ATTACK)
-
-func perAttackAction() -> void:
-	pass
-
-func readyForPostAttack() -> bool:
-	if getCompleteAttackSequence():
-		if getCurrentAttackInSequence() > getAttacksInSequence():
-			return true
+func detectBlockers():
+	var collider = collisionRayCast.get_collider()
+	if collider is StaticBody2D:
+		if not getPathBlocked():
+			setPathBlocked(true)
 	else:
-		if (
-			getCurrentAttackInSequence() > 1
-			and not isPlayerInRange()
-			or getCurrentAttackInSequence() > getAttacksInSequence()
-		):
-			return true
-	return false
+		setPathBlocked(false)
+
+func setNavigationPoint(target_position : Vector2) -> void:
+	var closest_nav_point = navigation_mesh.get_closest_point(
+		target_position
+	)
+	path = navigation_mesh.get_simple_path(
+		global_transform.origin,
+		closest_nav_point
+	)
+	path_ind = 1
+
+func moveToNavigationPoint() -> void:
+	if path_ind < path.size():
+		var move_vec = (path[path_ind] - global_transform.origin)
+		if move_vec.length() < getVectorThreshold():
+			path_ind += 1
+		else:
+			move_and_slide(move_vec.normalized() * getMoveSpeed())
+
+func setPlayerLocationAsTargetVector() -> void:
+	setVelocity(Vector2())
+	var player_position = getPlayer().get_global_position()
+	var ai_position = get_global_position()
+	if player_position.x > ai_position.x:
+		velocity.x += 1
+	if player_position.x + PLAYER_POSITION_OFFSET < ai_position.x:
+		velocity.x -= 1
+	if player_position.y + PLAYER_POSITION_OFFSET > ai_position.y:
+		velocity.y += 1
+	if player_position.y - PLAYER_POSITION_OFFSET < ai_position.y:
+		velocity.y -= 1
+	setVelocity(getVelocity().normalized() * getMoveSpeed())
 
 func runDecisionTree() -> void:
 	if getPlayer():
 		alignRayCastToPlayer()
 		detectBlockers()
-		if (
-			isPlayerInRange()
-			and not getPathBlocked()
-			or getAttackStarted()
-			or getState() == POST_ATTACK	
-		):
-			setPreAttack()
-			if getState() == ATTACKING:
-				perAttackAction()
+		if getPathBlocked():
+			setState(NAVIGATING)
+			setNavigationPoint(player.get_global_position())
+			moveToNavigationPoint()
 		else:
-			.runDecisionTree()
-	animatedSprite.play(getAnimation())
+			setState(FOLLOWING_PLAYER)
+			setPlayerLocationAsTargetVector()
+			move_and_slide(getVelocity())
+	else:
+		setState(IDLE)
+		# they AI should follow a path in this situation
+		# or potentially idle
 
-func handlePostAnimState() -> void:
-	match getState():
-		PRE_ATTACK: 
-			setState(ATTACKING)
-		ATTACKING:
-			setHasAttackLanded(false)
-			setCurrentAttackInSequence(getCurrentAttackInSequence() + 1)
-			if readyForPostAttack():
-				setAttackStarted(false)
-				setState(POST_ATTACK)
-				setCurrentAttackInSequence(1)
-		POST_ATTACK:
-			setState(IDLE)
+func _process(_delta : float) -> void:
+	detectPlayer()
+
+func _physics_process(_delta : float) -> void:
+	runDecisionTree()
